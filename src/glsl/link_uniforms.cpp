@@ -396,7 +396,7 @@ public:
 
    void start_shader(gl_shader_stage shader_type)
    {
-      assert(shader_type < MESA_SHADER_STAGES);
+//      assert(shader_type < MESA_SHADER_STAGES);
       this->shader_type = shader_type;
 
       this->shader_samplers_used = 0;
