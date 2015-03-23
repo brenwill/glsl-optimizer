@@ -186,6 +186,18 @@ static void print_texlod_workarounds(int usage_bitfield, int usage_proj_bitfield
 			}
 			if (usage_proj_bitfield & mask)
 			{
+				// 2D projected read also has a vec4 UV variant
+				if (dim == GLSL_SAMPLER_DIM_2D)
+				{
+					str.asprintf_append("%s vec4 impl_%stexture2DProjLodEXT(%s sampler2D sampler, highp vec4 coord, mediump float lod)\n", precString, precName, precString);
+					str.asprintf_append("{\n");
+					str.asprintf_append("#if defined(GL_EXT_shader_texture_lod)\n");
+					str.asprintf_append("\treturn texture%sProjLodEXT(sampler, coord, lod);\n", tex_sampler_dim_name[dim]);
+					str.asprintf_append("#else\n");
+					str.asprintf_append("\treturn texture%sProj(sampler, coord, lod);\n", tex_sampler_dim_name[dim]);
+					str.asprintf_append("#endif\n");
+					str.asprintf_append("}\n\n");
+				}
 				str.asprintf_append("%s vec4 impl_%stexture%sProjLodEXT(%s sampler%s sampler, highp vec%d coord, mediump float lod)\n", precString, precName, tex_sampler_dim_name[dim], precString, tex_sampler_dim_name[dim], tex_sampler_dim_size[dim] + 1);
 				str.asprintf_append("{\n");
 				str.asprintf_append("#if defined(GL_EXT_shader_texture_lod)\n");
@@ -1342,7 +1354,13 @@ void ir_print_glsl_visitor::visit(ir_constant *ir)
 			|| (state->language_version < 130))
 			buffer.asprintf_append("%u", ir->value.u[0]);
 		else
-			buffer.asprintf_append("%uu", ir->value.u[0]);
+		{
+			// Old Adreno drivers try to be smart with '0u' and treat that as 'const int'. Sigh.
+			if (ir->value.u[0] == 0)
+				buffer.asprintf_append("uint(0)");
+			else
+				buffer.asprintf_append("%uu", ir->value.u[0]);
+		}
 		return;
 	}
 
