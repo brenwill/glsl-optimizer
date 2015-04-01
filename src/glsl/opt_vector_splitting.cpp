@@ -316,6 +316,8 @@ ir_vector_reference_visitor::get_split_list(exec_list *instructions,
 	  }
    }
 
+	delete loopstate;
+
    return !variable_list.is_empty();
 }
 
