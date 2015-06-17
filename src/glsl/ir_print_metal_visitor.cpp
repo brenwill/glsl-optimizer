@@ -1217,10 +1217,11 @@ void ir_print_metal_visitor::visit(ir_texture *ir)
 	const glsl_type* uv_type = ir->coordinate->type;
 	const int uv_dim = uv_type->vector_elements;
 	int sampler_uv_dim = tex_sampler_dim_size[sampler_dim];
-	if (is_shadow)
-		sampler_uv_dim += 1;
-	const bool is_proj = (uv_dim > sampler_uv_dim);
-	
+
+	// Metal separates reference value from UV dims, so don't increment
+	// UV dims here, and modify dimensional test for projection.
+	const bool is_proj = (uv_dim > sampler_uv_dim + 1);
+
 	// texture name & call to sample
 	ir->sampler->accept(this);
 	if (is_shadow)

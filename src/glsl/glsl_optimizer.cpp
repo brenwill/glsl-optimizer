@@ -62,6 +62,7 @@ initialize_mesa_context(struct gl_context *ctx, glslopt_target api)
 		break;
 	case kGlslTargetMetal:
 		ctx->Extensions.ARB_ES3_compatibility = true;
+		ctx->Extensions.EXT_shadow_samplers = true;
 		ctx->Extensions.EXT_shader_framebuffer_fetch = true;
 		break;
 	}
