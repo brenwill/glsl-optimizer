@@ -130,7 +130,7 @@ struct metal_print_context
 
 class ir_print_metal_visitor : public ir_visitor {
 public:
-	ir_print_metal_visitor(metal_print_context& ctx_, string_buffer& buf, global_print_tracker_metal* globals_, PrintGlslMode mode_, const _mesa_glsl_parse_state* state_)
+	ir_print_metal_visitor(metal_print_context& ctx_, string_buffer& buf, global_print_tracker_metal* globals_, PrintGlslMode mode_, const _mesa_glsl_parse_state* state_, bool tex_coord_inv_y_)
 		: ctx(ctx_)
 		, buffer(buf)
 		, loopstate(NULL)
@@ -145,6 +145,7 @@ public:
 		globals = globals_;
 		mode = mode_;
 		state = state_;
+		tex_coord_inv_y=tex_coord_inv_y_;
 	}
 
 	virtual ~ir_print_metal_visitor()
@@ -197,13 +198,15 @@ public:
 	bool	inside_lhs;
 	bool	skipped_this_ir;
 	bool	previous_skipped;
+	bool	tex_coord_inv_y;
 };
 
 
 char*
 _mesa_print_ir_metal(exec_list *instructions,
 	    struct _mesa_glsl_parse_state *state,
-		char* buffer, PrintGlslMode mode, int* outUniformsSize)
+		char* buffer, PrintGlslMode mode,
+		int* outUniformsSize, bool tex_coord_inv_y)
 {
 	metal_print_context ctx(buffer);
 
@@ -266,7 +269,7 @@ _mesa_print_ir_metal(exec_list *instructions,
 		}
 
 
-		ir_print_metal_visitor v (ctx, *strOut, &gtracker, mode, state);
+		ir_print_metal_visitor v (ctx, *strOut, &gtracker, mode, state, tex_coord_inv_y);
 		v.loopstate = ls;
 
 		ir->accept(&v);
@@ -294,7 +297,7 @@ _mesa_print_ir_metal(exec_list *instructions,
 	{
 		ir_constant* c = node->ir;
 
-		ir_print_metal_visitor v (ctx, ctx.prefixStr, &gtracker, mode, state);
+		ir_print_metal_visitor v (ctx, ctx.prefixStr, &gtracker, mode, state, tex_coord_inv_y);
 
 		v.buffer.asprintf_append ("constant ");
 		print_type(v.buffer, c, c->type, false);
@@ -1160,7 +1163,6 @@ static int tex_sampler_dim_size[] = {
 	1, 2, 3, 3, 2, 2, 2,
 };
 
-
 static void print_texture_uv (ir_print_metal_visitor* vis, ir_texture* ir, bool is_shadow, bool is_proj, int uv_dim, int sampler_uv_dim)
 {
 	if (!is_shadow)
@@ -1209,6 +1211,81 @@ static void print_texture_uv (ir_print_metal_visitor* vis, ir_texture* ir, bool 
 	}
 }
 
+static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir, bool is_shadow, bool is_proj, int uv_dim, int sampler_uv_dim)
+{
+	if (!is_shadow)
+	{
+		if (!is_proj)
+		{
+			// regular UV
+			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "(float3)(" : "(float2)(");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (".x, (1.0 - ");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (".y)");
+			if (sampler_uv_dim == 3) {
+				vis->buffer.asprintf_append (", ");
+				ir->coordinate->accept(vis);
+				vis->buffer.asprintf_append (".z");
+			}
+			vis->buffer.asprintf_append (")");
+		}
+		else
+		{
+			// regular projected
+			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "((float3)(" : "((float2)(");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (".x, (1.0 - ");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (".y)");
+			if (sampler_uv_dim == 3) {
+				vis->buffer.asprintf_append (", ");
+				ir->coordinate->accept(vis);
+				vis->buffer.asprintf_append (".z");
+			}
+			vis->buffer.asprintf_append (") / (float)(");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (uv_dim == 4 ? ").w)" : ").z)");
+		}
+	}
+	else if (is_shadow)
+	{
+		if (!is_proj)
+		{
+			// regular shadow
+			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "(float3)(" : "(float2)(");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (".x, (1.0 - ");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (".y)");
+			if (sampler_uv_dim == 3) {
+				vis->buffer.asprintf_append (", ");
+				ir->coordinate->accept(vis);
+				vis->buffer.asprintf_append (".z");
+			}
+			vis->buffer.asprintf_append ("), (float)(");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (uv_dim == 4 ? ").w" : ").z");
+		}
+		else
+		{
+			// projected shadow
+			vis->buffer.asprintf_append ("(float2)(");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (".x, (1.0 - ");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (".y)) / (float)(");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (").w, (float)(");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (").z / (float)(");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (").w");
+		}
+	}
+}
+
+
 void ir_print_metal_visitor::visit(ir_texture *ir)
 {
 	glsl_sampler_dim sampler_dim = (glsl_sampler_dim)ir->sampler->type->sampler_dimensionality;
@@ -1216,10 +1293,11 @@ void ir_print_metal_visitor::visit(ir_texture *ir)
 	const glsl_type* uv_type = ir->coordinate->type;
 	const int uv_dim = uv_type->vector_elements;
 	int sampler_uv_dim = tex_sampler_dim_size[sampler_dim];
-	if (is_shadow)
-		sampler_uv_dim += 1;
-	const bool is_proj = (uv_dim > sampler_uv_dim);
-	
+
+	// Metal separates reference value from UV dims, so don't increment
+	// UV dims here, and modify dimensional test for projection.
+	const bool is_proj = (uv_dim > sampler_uv_dim + 1);
+
 	// texture name & call to sample
 	ir->sampler->accept(this);
 	if (is_shadow)
@@ -1240,7 +1318,14 @@ void ir_print_metal_visitor::visit(ir_texture *ir)
 	buffer.asprintf_append (", ");
 
 	// texture coordinate
-	print_texture_uv (this, ir, is_shadow, is_proj, uv_dim, sampler_uv_dim);
+	if (tex_coord_inv_y)
+	{
+		print_texture_uv_inv_y (this, ir, is_shadow, is_proj, uv_dim, sampler_uv_dim);
+	}
+	else
+	{
+		print_texture_uv (this, ir, is_shadow, is_proj, uv_dim, sampler_uv_dim);
+	}
 
 	// lod bias
 	if (ir->op == ir_txb)

@@ -62,6 +62,7 @@ initialize_mesa_context(struct gl_context *ctx, glslopt_target api)
 		break;
 	case kGlslTargetMetal:
 		ctx->Extensions.ARB_ES3_compatibility = true;
+		ctx->Extensions.EXT_shadow_samplers = true;
 		ctx->Extensions.EXT_shader_framebuffer_fetch = true;
 		break;
 	}
@@ -94,6 +95,7 @@ struct glslopt_ctx {
 	struct gl_context mesa_ctx;
 	void* mem_ctx;
 	glslopt_target target;
+	bool tex_coord_inv_y = false;
 };
 
 glslopt_ctx* glslopt_initialize (glslopt_target target)
@@ -111,6 +113,16 @@ void glslopt_set_max_unroll_iterations (glslopt_ctx* ctx, unsigned iterations)
 {
 	for (int i = 0; i < MESA_SHADER_STAGES; ++i)
 		ctx->mesa_ctx.Const.ShaderCompilerOptions[i].MaxUnrollIterations = iterations;
+}
+
+bool glslopt_get_tex_coord_inv_y (glslopt_ctx* ctx)
+{
+	return ctx->tex_coord_inv_y;
+}
+
+void glslopt_set_tex_coord_inv_y (glslopt_ctx* ctx, bool tex_coord_inv_y)
+{
+	ctx->tex_coord_inv_y = tex_coord_inv_y;
 }
 
 struct glslopt_shader_var
@@ -651,7 +663,7 @@ glslopt_shader* glslopt_optimize (glslopt_ctx* ctx, glslopt_shader_type type, co
 	if (!state->error) {
 		validate_ir_tree(ir);
 		if (ctx->target == kGlslTargetMetal)
-			shader->rawOutput = _mesa_print_ir_metal(ir, state, ralloc_strdup(shader, ""), printMode, &shader->uniformsSize);
+			shader->rawOutput = _mesa_print_ir_metal(ir, state, ralloc_strdup(shader, ""), printMode, &shader->uniformsSize, ctx->tex_coord_inv_y);
 		else
 			shader->rawOutput = _mesa_print_ir_glsl(ir, state, ralloc_strdup(shader, ""), printMode);
 	}
@@ -692,7 +704,7 @@ glslopt_shader* glslopt_optimize (glslopt_ctx* ctx, glslopt_shader_type type, co
 	if (!state->error)
 	{
 		if (ctx->target == kGlslTargetMetal)
-			shader->optimizedOutput = _mesa_print_ir_metal(ir, state, ralloc_strdup(shader, ""), printMode, &shader->uniformsSize);
+			shader->optimizedOutput = _mesa_print_ir_metal(ir, state, ralloc_strdup(shader, ""), printMode, &shader->uniformsSize, ctx->tex_coord_inv_y);
 		else
 			shader->optimizedOutput = _mesa_print_ir_glsl(ir, state, ralloc_strdup(shader, ""), printMode);
 	}

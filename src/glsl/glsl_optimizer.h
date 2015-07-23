@@ -66,6 +66,9 @@ void glslopt_cleanup (glslopt_ctx* ctx);
 
 void glslopt_set_max_unroll_iterations (glslopt_ctx* ctx, unsigned iterations);
 
+bool glslopt_get_tex_coord_inv_y (glslopt_ctx* ctx);
+void glslopt_set_tex_coord_inv_y (glslopt_ctx* ctx, bool tex_coord_inv_y);
+
 glslopt_shader* glslopt_optimize (glslopt_ctx* ctx, glslopt_shader_type type, const char* shaderSource, unsigned options);
 bool glslopt_get_status (glslopt_shader* shader);
 const char* glslopt_get_output (glslopt_shader* shader);
