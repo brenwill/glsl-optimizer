@@ -749,6 +749,9 @@ void ir_print_metal_visitor::visit(ir_function_signature *ir)
 
 	if (isMain)
 	{
+        if (this->mode_whole == kPrintGlslVertex) {
+            indent(); buffer.asprintf_append ("_mtl_o.gl_Position.z = (_mtl_o.gl_Position.z + _mtl_o.gl_Position.w) / 2.0f;\n");
+        }
 		// return stuff
 		indent(); buffer.asprintf_append ("return _mtl_o;\n");
 	}
