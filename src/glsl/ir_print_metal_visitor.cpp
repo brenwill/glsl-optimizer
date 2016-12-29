@@ -403,12 +403,12 @@ void ir_print_metal_visitor::print_var_name (ir_variable* v)
 
 static void print_type_precision(string_buffer& buffer, const glsl_type *t, glsl_precision prec, bool arraySize)
 {
-	const bool halfPrec = (prec == glsl_precision_medium || prec == glsl_precision_low);
+	const bool halfPrec = (prec == glsl_precision_low);
 
 	const char* typeName = t->name;
 	// scalars
 	if (!strcmp(typeName, "float"))
-		typeName = halfPrec ? "half" : "float";
+		typeName = "float";     // Don't use scalar halfs.
 	else if (!strcmp(typeName, "int"))
 		typeName = halfPrec ? "short" : "int";
 	// vectors
@@ -484,8 +484,6 @@ static void print_type_precision(string_buffer& buffer, const glsl_type *t, glsl
 static void print_type(string_buffer& buffer, ir_instruction* ir, const glsl_type *t, bool arraySize)
 {
 	glsl_precision prec = precision_from_ir(ir);
-	if (prec == glsl_precision_low)
-		prec = glsl_precision_medium; // Metal does not have low precision; treat as medium
 	print_type_precision(buffer, t, prec, arraySize);
 }
 
@@ -500,11 +498,7 @@ static void print_type_post(string_buffer& buffer, const glsl_type *t, bool arra
 
 static void get_metal_type_size(const glsl_type* type, glsl_precision prec, int& size, int& alignment)
 {
-	if (prec == glsl_precision_undefined)
-		prec = glsl_precision_high;
-	if (prec == glsl_precision_low)
-		prec = glsl_precision_medium;
-	const bool half = (prec == glsl_precision_medium);
+    const bool half = (prec == glsl_precision_low);
 
 	const int asize = type->is_array() ? type->length : 1;
 	if (type->is_array())
@@ -913,11 +907,11 @@ static bool is_different_precision(glsl_precision a, glsl_precision b)
 		a = glsl_precision_high;
 	if (b == glsl_precision_undefined)
 		b = glsl_precision_high;
-	// Metal does not have "low" precision; treat as medium
-	if (a == glsl_precision_low)
-		a = glsl_precision_medium;
-	if (b == glsl_precision_low)
-		b = glsl_precision_medium;
+	// Metal does not have "medium" precision; treat as high
+	if (a == glsl_precision_medium)
+		a = glsl_precision_high;
+	if (b == glsl_precision_medium)
+		b = glsl_precision_high;
 
 	return a != b;
 }
@@ -1019,7 +1013,7 @@ void ir_print_metal_visitor::visit(ir_expression *ir)
 			print_type(buffer, ir, ir->type, true);
 			buffer.asprintf_append(">(");
 		} else if (ir->operation == ir_unop_rcp) {
-			const bool halfCast = (arg_prec == glsl_precision_medium || arg_prec == glsl_precision_low);
+			const bool halfCast = (arg_prec == glsl_precision_low);
 			buffer.asprintf_append (halfCast ? "((half)1.0/(" : "(1.0/(");
 		} else {
 			buffer.asprintf_append ("%s(", operator_glsl_strs[ir->operation]);
@@ -1075,7 +1069,7 @@ void ir_print_metal_visitor::visit(ir_expression *ir)
 		// "matrix/scalar" - Metal does not have it, so print multiply by inverse instead
 		buffer.asprintf_append ("(");
 		ir->operands[0]->accept(this);
-		const bool halfCast = (arg_prec == glsl_precision_medium || arg_prec == glsl_precision_low);
+		const bool halfCast = (arg_prec == glsl_precision_low);
 		buffer.asprintf_append (halfCast ? " * (1.0h/half(" : " * (1.0/(");
 		ir->operands[1]->accept(this);
 		buffer.asprintf_append (")))");
