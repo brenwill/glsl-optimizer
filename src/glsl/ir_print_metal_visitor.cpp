@@ -1014,7 +1014,7 @@ void ir_print_metal_visitor::visit(ir_expression *ir)
 			buffer.asprintf_append(">(");
 		} else if (ir->operation == ir_unop_rcp) {
 			const bool halfCast = (arg_prec == glsl_precision_low);
-			buffer.asprintf_append (halfCast ? "((half)1.0/(" : "(1.0/(");
+			buffer.asprintf_append (halfCast ? "(half(1.0)/(" : "(1.0/(");
 		} else {
 			buffer.asprintf_append ("%s(", operator_glsl_strs[ir->operation]);
 		}
@@ -1167,16 +1167,16 @@ static void print_texture_uv (ir_print_metal_visitor* vis, ir_texture* ir, bool 
 		if (!is_proj)
 		{
 			// regular UV
-			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "(float3)(" : "(float2)(");
+			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "float3(" : "float2(");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (")");
 		}
 		else
 		{
 			// regular projected
-			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "((float3)(" : "((float2)(");
+			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "(float3(" : "(float2(");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? ").xyz / (float)(" : ").xy / (float)(");
+			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? ").xyz / float(" : ").xy / float(");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (uv_dim == 4 ? ").w)" : ").z)");
 		}
@@ -1186,22 +1186,22 @@ static void print_texture_uv (ir_print_metal_visitor* vis, ir_texture* ir, bool 
 		if (!is_proj)
 		{
 			// regular shadow
-			vis->buffer.asprintf_append (uv_dim == 4 ? "(float3)(" : "(float2)(");
+			vis->buffer.asprintf_append (uv_dim == 4 ? "float3(" : "float2(");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (uv_dim == 4 ? ").xyz, (" : ").xy, (float)(");
+			vis->buffer.asprintf_append (uv_dim == 4 ? ").xyz, (" : ").xy, float(");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (uv_dim == 4 ? ").w" : ").z");
 		}
 		else
 		{
 			// projected shadow
-			vis->buffer.asprintf_append ("(float2)(");
+			vis->buffer.asprintf_append ("float2(");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").xy / (float)(");
+			vis->buffer.asprintf_append (").xy / float(");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").w, (float)(");
+			vis->buffer.asprintf_append (").w, float(");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").z / (float)(");
+			vis->buffer.asprintf_append (").z / float(");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (").w");
 		}
@@ -1215,7 +1215,7 @@ static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir,
 		if (!is_proj)
 		{
 			// regular UV
-			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "(float3)(" : "(float2)(");
+			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "float3(" : "float2(");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (".x, (1.0 - ");
 			ir->coordinate->accept(vis);
@@ -1230,7 +1230,7 @@ static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir,
 		else
 		{
 			// regular projected
-			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "((float3)(" : "((float2)(");
+			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "(float3(" : "(float2(");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (".x, (1.0 - ");
 			ir->coordinate->accept(vis);
@@ -1240,7 +1240,7 @@ static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir,
 				ir->coordinate->accept(vis);
 				vis->buffer.asprintf_append (".z");
 			}
-			vis->buffer.asprintf_append (") / (float)(");
+			vis->buffer.asprintf_append (") / float(");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (uv_dim == 4 ? ").w)" : ").z)");
 		}
@@ -1250,7 +1250,7 @@ static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir,
 		if (!is_proj)
 		{
 			// regular shadow
-			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "(float3)(" : "(float2)(");
+			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "float3(" : "float2(");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (".x, (1.0 - ");
 			ir->coordinate->accept(vis);
@@ -1260,22 +1260,22 @@ static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir,
 				ir->coordinate->accept(vis);
 				vis->buffer.asprintf_append (".z");
 			}
-			vis->buffer.asprintf_append ("), (float)(");
+			vis->buffer.asprintf_append ("), float(");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (uv_dim == 4 ? ").w" : ").z");
 		}
 		else
 		{
 			// projected shadow
-			vis->buffer.asprintf_append ("(float2)(");
+			vis->buffer.asprintf_append ("float2(");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (".x, (1.0 - ");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (".y)) / (float)(");
+			vis->buffer.asprintf_append (".y)) / float(");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").w, (float)(");
+			vis->buffer.asprintf_append (").w, float(");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").z / (float)(");
+			vis->buffer.asprintf_append (").z / float(");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (").w");
 		}
@@ -1351,9 +1351,9 @@ void ir_print_metal_visitor::visit(ir_texture *ir)
 		ir->lod_info.grad.dPdx->accept(this);
 
 		if (sampler_dim == GLSL_SAMPLER_DIM_CUBE)
-			buffer.asprintf_append ("), (float3)(");
+			buffer.asprintf_append ("), float3(");
 		else
-			buffer.asprintf_append ("), (float2)(");
+			buffer.asprintf_append ("), float2(");
 
 		ir->lod_info.grad.dPdy->accept(this);
 		buffer.asprintf_append ("))");
