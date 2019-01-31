@@ -99,6 +99,7 @@ struct metal_print_context
 	, inoutStr(ralloc_strdup(buffer, ""))
 	, uniformStr(ralloc_strdup(buffer, ""))
 	, paramsStr(ralloc_strdup(buffer, ""))
+	, typedeclStr(ralloc_strdup(buffer, ""))
 	, writingParams(false)
 	, matrixCastsDone(false)
 	, matrixConstructorsDone(false)
@@ -117,6 +118,7 @@ struct metal_print_context
 	string_buffer inoutStr;
 	string_buffer uniformStr;
 	string_buffer paramsStr;
+	string_buffer typedeclStr;
 	bool writingParams;
 	bool matrixCastsDone;
 	bool matrixConstructorsDone;
@@ -212,6 +214,7 @@ _mesa_print_ir_metal(exec_list *instructions,
 
 	// includes, prefix etc.
 	ctx.prefixStr.asprintf_append ("#include <metal_stdlib>\n");
+	ctx.prefixStr.asprintf_append ("#pragma clang diagnostic ignored \"-Wparentheses-equality\"\n");
 	ctx.prefixStr.asprintf_append ("using namespace metal;\n");
 
 	ctx.inputStr.asprintf_append("struct xlatMtlShaderInput {\n");
@@ -267,7 +270,10 @@ _mesa_print_ir_metal(exec_list *instructions,
 			if (var->data.mode == ir_var_shader_inout)
 				strOut = &ctx.inoutStr;
 		}
-
+		
+		if (ir->ir_type == ir_type_typedecl) {
+			strOut = &ctx.typedeclStr;
+		}
 
 		ir_print_metal_visitor v (ctx, *strOut, &gtracker, mode, state, tex_coord_inv_y);
 		v.loopstate = ls;
@@ -293,6 +299,8 @@ _mesa_print_ir_metal(exec_list *instructions,
 	ctx.uniformStr.asprintf_append("};\n");
 
 	// emit global array/struct constants
+	
+	ctx.prefixStr.asprintf_append("%s", ctx.typedeclStr.c_str());
 	foreach_in_list_safe(gconst_entry_metal, node, &gtracker.global_constants)
 	{
 		ir_constant* c = node->ir;
@@ -467,6 +475,8 @@ static void print_type_precision(string_buffer& buffer, const glsl_type *t, glsl
 		typeName = "depth2d<float>"; // depth type must always be float
 	else if (!strcmp(typeName, "samplerCubeShadow"))
 		typeName = "depthcube<float>"; // depth type must always be float
+	else if (!strcmp(typeName, "sampler2DArray"))
+		typeName = halfPrec ? "texture2d_array<half>" : "texture2d_array<float>";
 
 	if (t->base_type == GLSL_TYPE_ARRAY) {
 		print_type_precision(buffer, t->fields.array, prec, true);
@@ -661,6 +671,20 @@ void ir_print_metal_visitor::visit(ir_variable *ir)
 	{
 		buffer.asprintf_append (" = ");
 		visit (ir->constant_value);
+	}
+
+	if ((ir->data.mode == ir_var_auto || ir->data.mode == ir_var_temporary) && (ir->type->matrix_columns == 1)) {
+		switch (ir->type->base_type) {
+			case GLSL_TYPE_INT:
+			case GLSL_TYPE_FLOAT:
+				buffer.asprintf_append (" = 0");
+				break;
+			case GLSL_TYPE_BOOL:
+				buffer.asprintf_append (" = false");
+				break;
+			default:
+				break;
+		}
 	}
 }
 
@@ -1089,9 +1113,10 @@ void ir_print_metal_visitor::visit(ir_expression *ir)
 			else if (op0cast)
 			{
 				print_cast (buffer, arg_prec, ir->operands[0]);
+				buffer.asprintf_append ("(");
 			}
 			ir->operands[0]->accept(this);
-			if (op0castTo1)
+			if (op0castTo1 || op0cast)
 			{
 				buffer.asprintf_append (")");
 			}
@@ -1110,9 +1135,10 @@ void ir_print_metal_visitor::visit(ir_expression *ir)
 			else if (op1cast)
 			{
 				print_cast (buffer, arg_prec, ir->operands[1]);
+				buffer.asprintf_append ("(");
 			}
 			ir->operands[1]->accept(this);
-			if (op1castTo0)
+			if (op1castTo0 || op1cast)
 			{
 				buffer.asprintf_append (")");
 			}
@@ -1160,124 +1186,153 @@ static int tex_sampler_dim_size[] = {
 	1, 2, 3, 3, 2, 2, 2,
 };
 
-static void print_texture_uv (ir_print_metal_visitor* vis, ir_texture* ir, bool is_shadow, bool is_proj, int uv_dim, int sampler_uv_dim)
+static void print_texture_uv (ir_print_metal_visitor* vis, ir_texture* ir, bool is_shadow, bool is_proj, bool is_array, int uv_dim, int sampler_uv_dim)
 {
 	if (!is_shadow)
 	{
-		if (!is_proj)
+		if (!is_proj && !is_array)
 		{
 			// regular UV
 			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "float3(" : "float2(");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (")");
 		}
+		else if (is_array)
+		{
+			// array sample
+			vis->buffer.asprintf_append ("float2((");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (").xy), uint((");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (").z)");
+		}
 		else
 		{
 			// regular projected
-			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "(float3(" : "(float2(");
+			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "float3((" : "float2((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? ").xyz / float(" : ").xy / float(");
+			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? ").xyz)" : ").xy)");
+			vis->buffer.asprintf_append (" / float((");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (uv_dim == 4 ? ").w)" : ").z)");
 		}
 	}
 	else if (is_shadow)
 	{
+		// Note that on metal sample_compare works differently than shadow2DEXT on GLES:
+		// it does not clamp neither the pixel value nor compare value to the [0.0, 1.0] range. To
+		// preserve same behavior we're clamping the argument explicitly.
 		if (!is_proj)
 		{
 			// regular shadow
-			vis->buffer.asprintf_append (uv_dim == 4 ? "float3(" : "float2(");
+			vis->buffer.asprintf_append (uv_dim == 4 ? "float3((" : "float2((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (uv_dim == 4 ? ").xyz, (" : ").xy, float(");
+			vis->buffer.asprintf_append (uv_dim == 4 ? ").xyz)" : ").xy)");
+			vis->buffer.asprintf_append (", saturate(float((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (uv_dim == 4 ? ").w" : ").z");
+			vis->buffer.asprintf_append (uv_dim == 4 ? ").w)" : ").z)");
 		}
 		else
 		{
 			// projected shadow
-			vis->buffer.asprintf_append ("float2(");
+			vis->buffer.asprintf_append ("float2((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").xy / float(");
+			vis->buffer.asprintf_append (").xy) / float((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").w, float(");
+			vis->buffer.asprintf_append (").w), saturate(float((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").z / float(");
+			vis->buffer.asprintf_append (").z) / float((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").w");
+			vis->buffer.asprintf_append (").w)");
 		}
 	}
 }
 
-static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir, bool is_shadow, bool is_proj, int uv_dim, int sampler_uv_dim)
+static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir, bool is_shadow, bool is_proj, bool is_array, int uv_dim, int sampler_uv_dim)
 {
 	if (!is_shadow)
 	{
-		if (!is_proj)
+		if (!is_proj && !is_array)
 		{
 			// regular UV
-			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "float3(" : "float2(");
+			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "float3((" : "float2((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (".x, (1.0 - ");
+			vis->buffer.asprintf_append (").x, (1.0 - (");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (".y)");
+			vis->buffer.asprintf_append (").y)");
 			if (sampler_uv_dim == 3) {
-				vis->buffer.asprintf_append (", ");
+				vis->buffer.asprintf_append (", (");
 				ir->coordinate->accept(vis);
-				vis->buffer.asprintf_append (".z");
+				vis->buffer.asprintf_append (").z");
 			}
 			vis->buffer.asprintf_append (")");
+		}
+		else if (is_array)
+		{
+			// array sample
+			vis->buffer.asprintf_append ("float2((");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (").x, (1.0 - (");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (").y), uint((");
+			ir->coordinate->accept(vis);
+			vis->buffer.asprintf_append (").z)");
 		}
 		else
 		{
 			// regular projected
-			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "(float3(" : "(float2(");
+			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "float3((" : "float2((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (".x, (1.0 - ");
+			vis->buffer.asprintf_append (").x, (1.0 - (");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (".y)");
+			vis->buffer.asprintf_append (").y)");
 			if (sampler_uv_dim == 3) {
-				vis->buffer.asprintf_append (", ");
+				vis->buffer.asprintf_append (", (");
 				ir->coordinate->accept(vis);
-				vis->buffer.asprintf_append (".z");
+				vis->buffer.asprintf_append (").z");
 			}
-			vis->buffer.asprintf_append (") / float(");
+			vis->buffer.asprintf_append (")");
+			vis->buffer.asprintf_append (") / float((");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (uv_dim == 4 ? ").w)" : ").z)");
 		}
 	}
 	else if (is_shadow)
 	{
+		// Note that on metal sample_compare works differently than shadow2DEXT on GLES:
+		// it does not clamp neither the pixel value nor compare value to the [0.0, 1.0] range. To
+		// preserve same behavior we're clamping the argument explicitly.
 		if (!is_proj)
 		{
 			// regular shadow
-			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "float3(" : "float2(");
+			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "float3((" : "float2((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (".x, (1.0 - ");
+			vis->buffer.asprintf_append (").x, (1.0 - (");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (".y)");
+			vis->buffer.asprintf_append (").y)");
 			if (sampler_uv_dim == 3) {
 				vis->buffer.asprintf_append (", ");
 				ir->coordinate->accept(vis);
 				vis->buffer.asprintf_append (".z");
 			}
-			vis->buffer.asprintf_append ("), float(");
+			vis->buffer.asprintf_append ("), saturate(float((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (uv_dim == 4 ? ").w" : ").z");
+			vis->buffer.asprintf_append (uv_dim == 4 ? ").w))" : ").z))");
 		}
 		else
 		{
 			// projected shadow
-			vis->buffer.asprintf_append ("float2(");
+			vis->buffer.asprintf_append ("float2((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (".x, (1.0 - ");
+			vis->buffer.asprintf_append (").x, (1.0 - (");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (".y)) / float(");
+			vis->buffer.asprintf_append (").y)) / float((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").w, float(");
+			vis->buffer.asprintf_append (").w), saturate(float((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").z / float(");
+			vis->buffer.asprintf_append (").z) / float((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").w");
+			vis->buffer.asprintf_append (").w))");
 		}
 	}
 }
@@ -1285,15 +1340,28 @@ static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir,
 
 void ir_print_metal_visitor::visit(ir_texture *ir)
 {
+	if (ir->op == ir_txs)
+	{
+		ir->sampler->accept(this);
+		buffer.asprintf_append (".get_width(");
+		ir->lod_info.lod->accept(this);
+		buffer.asprintf_append ("), ");
+		ir->sampler->accept(this);
+		buffer.asprintf_append (".get_height(");
+		ir->lod_info.lod->accept(this);
+		buffer.asprintf_append (")");
+		return;
+	}
 	glsl_sampler_dim sampler_dim = (glsl_sampler_dim)ir->sampler->type->sampler_dimensionality;
 	const bool is_shadow = ir->sampler->type->sampler_shadow;
+	const bool is_array = ir->sampler->type->sampler_array;
 	const glsl_type* uv_type = ir->coordinate->type;
 	const int uv_dim = uv_type->vector_elements;
 	int sampler_uv_dim = tex_sampler_dim_size[sampler_dim];
 
 	// Metal separates reference value from UV dims, so don't increment
 	// UV dims here, and modify dimensional test for projection.
-	const bool is_proj = (uv_dim > sampler_uv_dim + 1);
+	const bool is_proj = (uv_dim > sampler_uv_dim + 1) && !is_array;
 
 	// texture name & call to sample
 	ir->sampler->accept(this);
@@ -1302,7 +1370,7 @@ void ir_print_metal_visitor::visit(ir_texture *ir)
 		// For shadow sampling, Metal right now needs a hardcoded sampler state :|
 		if (!ctx.shadowSamplerDone)
 		{
-			ctx.prefixStr.asprintf_append("constexpr sampler _mtl_xl_shadow_sampler(address::clamp_to_edge, filter::linear, compare_func::less);\n");
+			ctx.prefixStr.asprintf_append("constexpr sampler _mtl_xl_shadow_sampler(address::clamp_to_edge, filter::linear, compare_func::less_equal);\n");
 			ctx.shadowSamplerDone = true;
 		}
 		buffer.asprintf_append (".sample_compare(_mtl_xl_shadow_sampler");
@@ -1317,11 +1385,11 @@ void ir_print_metal_visitor::visit(ir_texture *ir)
 	// texture coordinate
 	if (tex_coord_inv_y)
 	{
-		print_texture_uv_inv_y (this, ir, is_shadow, is_proj, uv_dim, sampler_uv_dim);
+		print_texture_uv_inv_y (this, ir, is_shadow, is_proj, is_array, uv_dim, sampler_uv_dim);
 	}
 	else
 	{
-		print_texture_uv (this, ir, is_shadow, is_proj, uv_dim, sampler_uv_dim);
+		print_texture_uv (this, ir, is_shadow, is_proj, is_array, uv_dim, sampler_uv_dim);
 	}
 
 	// lod bias
@@ -2027,7 +2095,7 @@ ir_print_metal_visitor::visit(ir_typedecl_statement *ir)
 		buffer.asprintf_append ("  ");
 		//if (state->es_shader)
 		//	buffer.asprintf_append ("%s", get_precision_string(s->fields.structure[j].precision)); //@TODO
-		print_type(buffer, ir, s->fields.structure[j].type, false);
+		print_type_precision(buffer, s->fields.structure[j].type, s->fields.structure[j].precision, false);
 		buffer.asprintf_append (" %s", s->fields.structure[j].name);
 		print_type_post(buffer, s->fields.structure[j].type, false);
 		buffer.asprintf_append (";\n");
