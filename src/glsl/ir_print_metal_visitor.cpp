@@ -1248,8 +1248,11 @@ static void print_texture_uv (ir_print_metal_visitor* vis, ir_texture* ir, bool 
 	}
 }
 
-static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir, bool is_shadow, bool is_proj, bool is_array, int uv_dim, int sampler_uv_dim)
+static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir, bool is_shadow, bool is_proj,
+									bool is_array, int uv_dim, int sampler_uv_dim, glsl_sampler_dim sampler_dim)
 {
+	const char* y_inv_pfx = (sampler_dim == GLSL_SAMPLER_DIM_CUBE) ? " -((" : " (1.0 - (";
+
 	if (!is_shadow)
 	{
 		if (!is_proj && !is_array)
@@ -1257,7 +1260,8 @@ static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir,
 			// regular UV
 			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "float3((" : "float2((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").x, (1.0 - (");
+			vis->buffer.asprintf_append (").x,");
+			vis->buffer.asprintf_append (y_inv_pfx);
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (").y)");
 			if (sampler_uv_dim == 3) {
@@ -1272,7 +1276,8 @@ static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir,
 			// array sample
 			vis->buffer.asprintf_append ("float2((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").x, (1.0 - (");
+			vis->buffer.asprintf_append (").x,");
+			vis->buffer.asprintf_append (y_inv_pfx);
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (").y), uint((");
 			ir->coordinate->accept(vis);
@@ -1283,7 +1288,8 @@ static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir,
 			// regular projected
 			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "float3((" : "float2((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").x, (1.0 - (");
+			vis->buffer.asprintf_append (").x,");
+			vis->buffer.asprintf_append (y_inv_pfx);
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (").y)");
 			if (sampler_uv_dim == 3) {
@@ -1307,7 +1313,8 @@ static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir,
 			// regular shadow
 			vis->buffer.asprintf_append (sampler_uv_dim == 3 ? "float3((" : "float2((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").x, (1.0 - (");
+			vis->buffer.asprintf_append (").x,");
+			vis->buffer.asprintf_append (y_inv_pfx);
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (").y)");
 			if (sampler_uv_dim == 3) {
@@ -1324,7 +1331,8 @@ static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir,
 			// projected shadow
 			vis->buffer.asprintf_append ("float2((");
 			ir->coordinate->accept(vis);
-			vis->buffer.asprintf_append (").x, (1.0 - (");
+			vis->buffer.asprintf_append (").x,");
+			vis->buffer.asprintf_append (y_inv_pfx);
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (").y)) / float((");
 			ir->coordinate->accept(vis);
@@ -1385,7 +1393,7 @@ void ir_print_metal_visitor::visit(ir_texture *ir)
 	// texture coordinate
 	if (tex_coord_inv_y)
 	{
-		print_texture_uv_inv_y (this, ir, is_shadow, is_proj, is_array, uv_dim, sampler_uv_dim);
+		print_texture_uv_inv_y (this, ir, is_shadow, is_proj, is_array, uv_dim, sampler_uv_dim, sampler_dim);
 	}
 	else
 	{
