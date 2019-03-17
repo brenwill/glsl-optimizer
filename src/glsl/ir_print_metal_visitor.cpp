@@ -416,7 +416,7 @@ static void print_type_precision(string_buffer& buffer, const glsl_type *t, glsl
 	const char* typeName = t->name;
 	// scalars
 	if (!strcmp(typeName, "float"))
-		typeName = "float";     // Don't use scalar halfs.
+		typeName = halfPrec ? "half" : "float";
 	else if (!strcmp(typeName, "int"))
 		typeName = halfPrec ? "short" : "int";
 	// vectors
