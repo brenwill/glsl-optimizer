@@ -411,7 +411,7 @@ void ir_print_metal_visitor::print_var_name (ir_variable* v)
 
 static void print_type_precision(string_buffer& buffer, const glsl_type *t, glsl_precision prec, bool arraySize)
 {
-	const bool halfPrec = (prec == glsl_precision_low);
+	const bool halfPrec = false;
 
 	const char* typeName = t->name;
 	// scalars
@@ -508,7 +508,7 @@ static void print_type_post(string_buffer& buffer, const glsl_type *t, bool arra
 
 static void get_metal_type_size(const glsl_type* type, glsl_precision prec, int& size, int& alignment)
 {
-    const bool half = (prec == glsl_precision_low);
+	const bool half = false;
 
 	const int asize = type->is_array() ? type->length : 1;
 	if (type->is_array())
@@ -1037,7 +1037,7 @@ void ir_print_metal_visitor::visit(ir_expression *ir)
 			print_type(buffer, ir, ir->type, true);
 			buffer.asprintf_append(">(");
 		} else if (ir->operation == ir_unop_rcp) {
-			const bool halfCast = (arg_prec == glsl_precision_low);
+			const bool halfCast = false;
 			buffer.asprintf_append (halfCast ? "(half(1.0)/(" : "(1.0/(");
 		} else {
 			buffer.asprintf_append ("%s(", operator_glsl_strs[ir->operation]);
@@ -1093,7 +1093,7 @@ void ir_print_metal_visitor::visit(ir_expression *ir)
 		// "matrix/scalar" - Metal does not have it, so print multiply by inverse instead
 		buffer.asprintf_append ("(");
 		ir->operands[0]->accept(this);
-		const bool halfCast = (arg_prec == glsl_precision_low);
+		const bool halfCast = false;
 		buffer.asprintf_append (halfCast ? " * (1.0h/half(" : " * (1.0/(");
 		ir->operands[1]->accept(this);
 		buffer.asprintf_append (")))");
