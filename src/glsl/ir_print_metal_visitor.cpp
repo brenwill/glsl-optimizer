@@ -585,10 +585,31 @@ void ir_print_metal_visitor::visit(ir_variable *ir)
 
 	buffer.asprintf_append ("%s%s%s%s",
 							cent, inv, interp[ir->data.interpolation], mode[ir->data.mode]);
-	print_type(buffer, ir, ir->type, false);
-	buffer.asprintf_append (" ");
-	print_var_name (ir);
-	print_type_post(buffer, ir->type, false);
+
+	// Metal does not support arrays in stage-in and stage-out, so we need to break them down.
+	unsigned var_mode = ir->data.mode;
+	bool is_stage_inout = var_mode == ir_var_shader_in || var_mode == ir_var_shader_out;
+	bool is_array = ir->type->base_type == GLSL_TYPE_ARRAY;
+	if (is_stage_inout && is_array) {
+		unsigned ary_len = ir->type->length;
+		for (unsigned idx = 0; idx < ary_len; idx++) {
+			print_type(buffer, ir, ir->type, false);
+			buffer.asprintf_append (" ");
+			print_var_name (ir);
+			buffer.asprintf_append ("_%u", idx);
+			if (idx < ary_len - 1) {
+				buffer.asprintf_append (";\n");
+				indent();
+				buffer.asprintf_append ("  ");
+			}
+		}
+	} else {
+		print_type(buffer, ir, ir->type, false);
+		buffer.asprintf_append (" ");
+		print_var_name (ir);
+		print_type_post(buffer, ir->type, false);
+	}
+
 
 	// special built-in variables
 	if (!strcmp(ir->name, "gl_FragDepth"))
@@ -1501,10 +1522,17 @@ void ir_print_metal_visitor::visit(ir_dereference_variable *ir)
 
 void ir_print_metal_visitor::visit(ir_dereference_array *ir)
 {
-   ir->array->accept(this);
-   buffer.asprintf_append ("[");
-   ir->array_index->accept(this);
-   buffer.asprintf_append ("]");
+	ir->array->accept(this);
+
+	unsigned var_mode = ir->variable_referenced()->data.mode;
+	if (var_mode == ir_var_shader_in || var_mode == ir_var_shader_out) {
+		buffer.asprintf_append ("_");
+		ir->array_index->accept(this);
+	} else {
+		buffer.asprintf_append ("[");
+		ir->array_index->accept(this);
+		buffer.asprintf_append ("]");
+	}
 }
 
 
