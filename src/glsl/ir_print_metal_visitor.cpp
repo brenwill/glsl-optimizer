@@ -1542,9 +1542,6 @@ void ir_print_metal_visitor::visit(ir_dereference_record *ir)
    buffer.asprintf_append (".%s", ir->field);
 }
 
-
-
-
 void ir_print_metal_visitor::emit_assignment_part (ir_dereference* lhs, ir_rvalue* rhs, unsigned write_mask, ir_rvalue* dstIndex)
 {
 	const bool prev_lhs_flag = this->inside_lhs;
@@ -1571,11 +1568,11 @@ void ir_print_metal_visitor::emit_assignment_part (ir_dereference* lhs, ir_rvalu
 			dstIndex->accept(this);
 			buffer.asprintf_append ("]");
 		}
-		
+
 		if (lhsType->matrix_columns <= 1 && lhsType->vector_elements > 1)
 			lhsType = glsl_type::get_instance(lhsType->base_type, 1, 1);
 	}
-	
+
 	char mask[5];
 	unsigned j = 0;
 	const glsl_type* rhsType = rhs->type;
@@ -1596,50 +1593,29 @@ void ir_print_metal_visitor::emit_assignment_part (ir_dereference* lhs, ir_rvalu
 		buffer.asprintf_append (".%s", mask);
 		hasWriteMask = true;
 	}
-	
+
 	buffer.asprintf_append (" = ");
-	
+
 	const bool typeMismatch = !dstIndex && (lhsType != rhsType);
-	
-	const bool precMismatch = is_different_precision (lhs->get_precision(), rhs->get_precision());
 	const bool addSwizzle = hasWriteMask && typeMismatch;
-	if (typeMismatch || precMismatch)
+	if (typeMismatch)
 	{
 		if (!addSwizzle)
 		{
-			if (lhsType->is_matrix())
-			{
-				// Metal does not have matrix precision casts right now, so emit workaround
-				// functions that would do that.
-				if (!ctx.matrixCastsDone)
-				{
-					ctx.prefixStr.asprintf_append(
-												  "inline float4x4 _xlcast_float4x4(half4x4 v) { return float4x4(float4(v[0]), float4(v[1]), float4(v[2]), float4(v[3])); }\n"
-												  "inline float3x3 _xlcast_float3x3(half3x3 v) { return float3x3(float3(v[0]), float3(v[1]), float3(v[2])); }\n"
-												  "inline float2x2 _xlcast_float2x2(half2x2 v) { return float2x2(float2(v[0]), float2(v[1])); }\n"
-												  "inline half4x4 _xlcast_half4x4(float4x4 v) { return half4x4(half4(v[0]), half4(v[1]), half4(v[2]), half4(v[3])); }\n"
-												  "inline half3x3 _xlcast_half3x3(float3x3 v) { return half3x3(half3(v[0]), half3(v[1]), half3(v[2])); }\n"
-												  "inline half2x2 _xlcast_half2x2(float2x2 v) { return half2x2(half2(v[0]), half2(v[1])); }\n"
-												  );
-					ctx.matrixCastsDone = true;
-				}
-				buffer.asprintf_append ("_xlcast_");
-			}
 			print_type(buffer, lhs, lhsType, true);
 		}
 		buffer.asprintf_append ("(");
 	}
-	
+
 	rhs->accept(this);
-	
-	if (typeMismatch || precMismatch)
+
+	if (typeMismatch)
 	{
 		buffer.asprintf_append (")");
 		if (addSwizzle)
 			buffer.asprintf_append (".%s", mask);
 	}
 }
-
 
 // Try to print (X = X + const) as (X += const), mostly to satisfy
 // OpenGL ES 2.0 loop syntax restrictions.
