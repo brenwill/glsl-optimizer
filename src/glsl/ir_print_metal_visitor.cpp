@@ -29,6 +29,7 @@
 #include "loop_analysis.h"
 #include "program/hash_table.h"
 #include <math.h>
+#include <vector>
 
 
 static void print_type(string_buffer& buffer, ir_instruction* ir, const glsl_type *t, bool arraySize);
@@ -86,6 +87,7 @@ struct global_print_tracker_metal
 
 	void*		mem_ctx;
 	bool		main_function_done;
+	std::vector<ir_variable*> matrix_vars_in;
 };
 
 
@@ -586,10 +588,12 @@ void ir_print_metal_visitor::visit(ir_variable *ir)
 	buffer.asprintf_append ("%s%s%s%s",
 							cent, inv, interp[ir->data.interpolation], mode[ir->data.mode]);
 
-	// Metal does not support arrays in stage-in and stage-out, so we need to break them down.
+	// Metal does not support arrays or matrices in stage-in and stage-out, so we need to break them down.
 	unsigned var_mode = ir->data.mode;
 	bool is_stage_inout = var_mode == ir_var_shader_in || var_mode == ir_var_shader_out;
 	bool is_array = ir->type->base_type == GLSL_TYPE_ARRAY;
+	bool is_vtx_attr = this->mode_whole == kPrintGlslVertex && ir->data.mode == ir_var_shader_in;
+
 	if (is_stage_inout && is_array) {
 		unsigned ary_len = ir->type->length;
 		for (unsigned idx = 0; idx < ary_len; idx++) {
@@ -603,13 +607,41 @@ void ir_print_metal_visitor::visit(ir_variable *ir)
 				buffer.asprintf_append ("  ");
 			}
 		}
+	} else if (is_stage_inout && ir->type->is_matrix()) {
+		unsigned col_cnt = ir->type->matrix_columns;
+		unsigned vec_size = ir->type->vector_elements;
+		for (unsigned idx = 0; idx < col_cnt; idx++) {
+			buffer.asprintf_append ("float%u ", vec_size);
+			print_var_name (ir);
+			buffer.asprintf_append ("_%u", idx);
+			if (is_vtx_attr) {
+				buffer.asprintf_append (" [[attribute(%i)]]", ctx.attributeCounter);
+				ir->data.explicit_location = 1;
+				ir->data.location = ctx.attributeCounter;
+				++ctx.attributeCounter;
+			}
+			if (idx < col_cnt - 1) {
+				buffer.asprintf_append (";\n");
+				indent();
+				buffer.asprintf_append ("  ");
+			}
+		}
+		if (var_mode == ir_var_shader_in) {
+			globals->matrix_vars_in.push_back(static_cast<ir_variable*>(ir));
+		}
 	} else {
 		print_type(buffer, ir, ir->type, false);
 		buffer.asprintf_append (" ");
 		print_var_name (ir);
 		print_type_post(buffer, ir->type, false);
-	}
 
+		if (is_vtx_attr) {
+			buffer.asprintf_append (" [[attribute(%i)]]", ctx.attributeCounter);
+			ir->data.explicit_location = 1;
+			ir->data.location = ctx.attributeCounter;
+			++ctx.attributeCounter;
+		}
+	}
 
 	// special built-in variables
 	if (!strcmp(ir->name, "gl_FragDepth"))
@@ -628,15 +660,6 @@ void ir_print_metal_visitor::visit(ir_variable *ir)
 		buffer.asprintf_append (" [[vertex_id]]");
 	else if (!strcmp(ir->name, "gl_InstanceID"))
 		buffer.asprintf_append (" [[instance_id]]");
-
-	// vertex shader input attribute?
-	if (this->mode_whole == kPrintGlslVertex && ir->data.mode == ir_var_shader_in)
-	{
-		buffer.asprintf_append (" [[attribute(%i)]]", ctx.attributeCounter);
-		ir->data.explicit_location = 1;
-		ir->data.location = ctx.attributeCounter;
-		++ctx.attributeCounter;
-	}
 
 	// fragment shader output?
 	if (this->mode_whole == kPrintGlslFragment && (ir->data.mode == ir_var_shader_out || ir->data.mode == ir_var_shader_inout))
@@ -766,8 +789,26 @@ void ir_print_metal_visitor::visit(ir_function_signature *ir)
 
 	if (isMain)
 	{
-		// output struct
-		indent(); buffer.asprintf_append ("xlatMtlShaderOutput _mtl_o;\n");
+		// Rebuild any matricies that had to be flattened into vectors for stage_in declarations
+		for (auto* v : globals->matrix_vars_in) {
+			indent();
+			print_type(buffer, v, v->type, false);
+			buffer.asprintf_append (" ");
+			print_var_name (v);
+			buffer.asprintf_append (" = ");
+			print_type(buffer, v, v->type, false);
+			buffer.asprintf_append ("(");
+			unsigned col_cnt = v->type->matrix_columns;
+			for (unsigned idx = 0; idx < col_cnt; idx++) {
+				buffer.asprintf_append ("_mtl_i.");
+				print_var_name (v);
+				buffer.asprintf_append ("_%u", idx);
+				if (idx < col_cnt - 1) {
+					buffer.asprintf_append (", ");
+				}
+			}
+			buffer.asprintf_append (");\n");
+		}
 
 		// insert postponed global assigments and variable declarations
 		assert (!globals->main_function_done);
@@ -778,6 +819,9 @@ void ir_print_metal_visitor::visit(ir_function_signature *ir)
 			as->accept(this);
 			buffer.asprintf_append(";\n");
 		}
+
+		// output struct
+		indent(); buffer.asprintf_append ("xlatMtlShaderOutput _mtl_o;\n");
 	}
 
    foreach_in_list(ir_instruction, inst, &ir->body) {
@@ -1502,7 +1546,7 @@ void ir_print_metal_visitor::visit(ir_swizzle *ir)
 
 static void print_var_inout (string_buffer& buf, ir_variable* var, bool insideLHS)
 {
-	if (var->data.mode == ir_var_shader_in)
+	if (var->data.mode == ir_var_shader_in && !var->type->is_matrix())
 		buf.asprintf_append ("_mtl_i.");
 	if (var->data.mode == ir_var_shader_out)
 		buf.asprintf_append ("_mtl_o.");
