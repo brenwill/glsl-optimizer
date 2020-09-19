@@ -1362,7 +1362,6 @@ static void print_texture_uv_inv_y (ir_print_metal_visitor* vis, ir_texture* ir,
 				ir->coordinate->accept(vis);
 				vis->buffer.asprintf_append (").z");
 			}
-			vis->buffer.asprintf_append (")");
 			vis->buffer.asprintf_append (") / float((");
 			ir->coordinate->accept(vis);
 			vis->buffer.asprintf_append (uv_dim == 4 ? ").w)" : ").z)");
