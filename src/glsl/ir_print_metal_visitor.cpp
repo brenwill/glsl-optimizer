@@ -775,12 +775,6 @@ void ir_print_metal_visitor::visit(ir_function_signature *ir)
 		}
 	}
 
-   if (ir->body.is_empty())
-   {
-	   buffer.asprintf_append (");\n");
-	   return;
-   }
-
    buffer.asprintf_append (")\n");
 
    indent();
